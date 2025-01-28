@@ -1,22 +1,37 @@
-import { useEffect, useCallback } from 'react';
+import {useEffect, useCallback, JSX} from 'react';
 import Leaflet from 'leaflet';
 import * as ReactLeaflet from 'react-leaflet';
+import { createRoot } from 'react-dom/client';
 import 'leaflet/dist/leaflet.css';
 import 'leaflet-draw/dist/leaflet.draw.css';
 import 'leaflet-draw';
 import styles from './Map.module.scss';
+import PopupContent from './Popup';
+import { MapProps, PopupData } from './types';
 
-const { MapContainer, FeatureGroup } = ReactLeaflet;
+const { MapContainer, TileLayer } = ReactLeaflet;
 
-const Map = ({ children, className, width, height, ...rest }) => {
+const Map: ({children, className, width, height, ...rest}: {
+    children: any;
+    className: any;
+    width: any;
+    height: any;
+    [p: string]: any
+}) => JSX.Element = ({
+                                     children,
+                                     className,
+                                     width,
+                                     height,
+                                     ...rest
+                                 }) => {
     let mapClassName = styles.map;
     if (className) {
         mapClassName = `${mapClassName} ${className}`;
     }
 
-    const handleCreated = useCallback(async (e) => {
-        const layer = e.layer;
-        const coords = layer.getLatLngs()[0].map(coord => [coord.lat, coord.lng]);
+    const handleCreated = useCallback(async (e: Leaflet.LeafletEvent) => {
+        const layer = e.layer as Leaflet.Polygon;
+        const coords = (layer.getLatLngs()[0] as Leaflet.LatLng[]).map((coord) => [coord.lat, coord.lng]);
 
         try {
             const response = await fetch('http://localhost:8080/api/find-in-polygon', {
@@ -30,29 +45,15 @@ const Map = ({ children, className, width, height, ...rest }) => {
             if (!response.ok) {
                 throw new Error('Failed to save coordinates');
             }
-            const data = await response.json();
 
-            console.log('Shape coordinates saved successfully');
-            console.log(data)
-            const popupContent = Object.entries(data)
-                .sort(([keyA], [keyB]) => {
-                    // Place 'Sample Score' at the top
-                    if (keyA === 'Sample Score') return -1;  // 'Sample Score' comes first
-                    if (keyB === 'Sample Score') return 1;   // 'Sample Score' comes first
-                    return 0;  // Keep other entries in original order
-                })
-                .map(([key, value]) => {
-                    // Format numbers with commas using toLocaleString
-                    if (typeof value === 'number') {
-                        value = value.toLocaleString();
-                    }
-                    return `${key}: ${value}`;
-                })
-                .join('<br />');
+            const data: PopupData = await response.json();
 
+            // Create a container for the popup
+            const container = document.createElement('div');
+            const root = createRoot(container);
+            root.render(<PopupContent data={data} />);
 
-            const polygonCenter = layer.getBounds().getCenter(); // Get the center of the polygon
-            layer.bindPopup(popupContent).openPopup();
+            layer.bindPopup(container).openPopup();
         } catch (error) {
             console.error('Error saving coordinates:', error);
         }
@@ -69,11 +70,12 @@ const Map = ({ children, className, width, height, ...rest }) => {
         })();
     }, []);
 
-    const DrawControl = ({ position }) => {
+    const DrawControl: React.FC<{ position: Leaflet.ControlPosition }> = ({ position }) => {
         const map = ReactLeaflet.useMap();
 
         useEffect(() => {
             const featureGroup = new Leaflet.FeatureGroup();
+
             const drawControl = new Leaflet.Control.Draw({
                 position,
                 draw: {
@@ -93,7 +95,7 @@ const Map = ({ children, className, width, height, ...rest }) => {
             map.addLayer(featureGroup);
             map.addControl(drawControl);
 
-            map.on(Leaflet.Draw.Event.CREATED, (e) => {
+            map.on(Leaflet.Draw.Event.CREATED, (e: Leaflet.LeafletEvent) => {
                 featureGroup.addLayer(e.layer);
                 handleCreated(e);
             });
@@ -107,10 +109,23 @@ const Map = ({ children, className, width, height, ...rest }) => {
         return null;
     };
 
+    // Default map content if no children provided
+    const defaultMapContent = (reactLeaflet: typeof ReactLeaflet, leaflet: typeof Leaflet) => (
+        <TileLayer
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        />
+    );
+
     return (
-        <MapContainer className={mapClassName} {...rest}>
+        <MapContainer
+            className={mapClassName}
+            center={[51.505, -0.09]} // Default center
+            zoom={13} // Default zoom
+            {...rest}
+        >
             <DrawControl position="topleft" />
-            {children(ReactLeaflet, Leaflet)}
+            {children ? children(ReactLeaflet, Leaflet) : defaultMapContent(ReactLeaflet, Leaflet)}
         </MapContainer>
     );
 };
